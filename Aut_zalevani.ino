@@ -39,13 +39,23 @@ unsigned long max_delka_zalevani = 20;
 int vlhkost1 = 100;
 int vlhkost2 = 100;
 
-int stav = 0;
-int test = 0;
+
 //0 - vlhkost OK
 //1 - sucho, cekani dle promenne zpozdeni
 //2 - zalevam
+int stav = 0;
+int test = 0;
+int disp = 0;
+int chyba_cerpadla = 0;
+int blik = 0;
+
+unsigned long delka_zalevani = 0;
+unsigned long max_delka_zalevani_den = 60000; //maximalni delka zalevani za jeden den je 3min
+
+
 
 void setup() {
+  vykresliText(0, "Zalevani 1.0");
   pinMode(cerpadloPin, OUTPUT);
   digitalWrite(cerpadloPin, HIGH);
   // zahájení komunikace po sériové lince
@@ -71,7 +81,7 @@ void setup() {
   digitalWrite(ledBluePin, LOW);
 
   attachInterrupt(0, tlacitko_test, CHANGE);
-  
+
 }
 
 void loop() {
@@ -116,11 +126,45 @@ void loop() {
     text += "%";   
     Serial.println(text);
 
-    mujOled.firstPage();
-    do {
-      // vykreslení zadané zprávy od zadané pozice
-      vykresliText(0, text);
-    } while( mujOled.nextPage() );
+    if (stav == 1)
+    {
+      if(disp == 0)
+      {
+          vykresliText(0, text);
+      }
+      else
+      {
+         int tme = zpozdeni - ((millis() - cas_sucha)/1000);                                     //Time we are converting. This can be passed from another function.
+         int hr = tme/3600;                                                        //Number of seconds in an hour
+         int mins = (tme-hr*3600)/60;                                              //Remove the number of hours and calculate the minutes.
+         int sec = tme-hr*3600-mins*60;                                            //Remove the number of hours and minutes, leaving only seconds.
+
+         String hr_s;
+         if(hr<10)
+            hr_s = "0" + String(hr);
+         else
+            hr_s = String(hr);
+
+         String mins_s;
+         if(mins<10)
+            mins_s = "0" + String(mins);
+         else
+            mins_s = String(mins);
+
+         String sec_s;
+         if(sec<10)
+            sec_s = "0" + String(sec);
+         else
+            sec_s = String(sec);
+         
+         String hrMinSec = ("Z: " + hr_s + ":" + mins_s + ":" + sec_s);  //Converts to HH:MM:SS string. This can be returned to the calling function.
+
+         vykresliText(0, hrMinSec);
+      }
+      disp = !disp;
+    }
+    else
+        vykresliText(0, text);
 
     // ukončení řádku na sériové lince
     Serial.println();
@@ -160,7 +204,7 @@ void loop() {
         stopCerpadlo();
       }
       if ((vlhkost1 > 60) || (vlhkost2 > 60))
-      {
+      {     
         stopCerpadlo();
       }
     }
@@ -168,6 +212,8 @@ void loop() {
       
   //set LED color according to current status
   setLED();
+  //check watchdog condition
+  run_watchdog();
   //wait before few miliseconds
   delay(300);
   //together with previous 200ms for power on sensors, we get 0,5s loop
@@ -175,18 +221,22 @@ void loop() {
 
 void startCerpadlo()
 {
-    //change state
-    stav = 2;
-    //set output pin to LOW (relay module uses inverted logic)
-    digitalWrite(cerpadloPin, LOW);
-    //write down time when pump started
-    cas_spusteni = millis();
+    if(!chyba_cerpadla)
+    {
+        //change state
+        stav = 2;
+        //set output pin to LOW (relay module uses inverted logic)
+        digitalWrite(cerpadloPin, LOW);
+        //write down time when pump started
+        cas_spusteni = millis();
+    }
 }
 
 void stopCerpadlo()
 {
     //set output pin to HIGH (relay module uses inverted logic)
     digitalWrite(cerpadloPin, HIGH);
+    delka_zalevani += millis() - cas_spusteni;
     //change state    
     stav = 0;
 }
@@ -194,7 +244,16 @@ void stopCerpadlo()
 //Set LED color according to current state
 void setLED()
 {
+  if(chyba_cerpadla == 1)
+  {
+    digitalWrite(ledGreenPin, LOW);
+    digitalWrite(ledRedPin, blik);
+    digitalWrite(ledBluePin, LOW);
+    blik = !blik;
+    return;
+  }
 
+  
   if(stav == 0)
   {
     digitalWrite(ledGreenPin, HIGH);
@@ -235,6 +294,7 @@ void tlacitko_test()
       else {
           startCerpadlo();
           test = 1;
+            vykresliText(0, "Test....");
       }
       setLED();
   }
@@ -243,15 +303,33 @@ void tlacitko_test()
 
 // funkce vykresliText pro výpis textu na OLED od zadané pozice
 void vykresliText(int posun, String text) {
-  // nastavení písma, další písma zde:
-  // https://github.com/olikraus/u8glib/wiki/fontsize
-  mujOled.setFont(u8g_font_10x20);
-  // nastavení výpisu od souřadnic x=0, y=25; y záleží na velikosti písma
-  mujOled.setPrintPos(0, 25);
-  // uložení části zprávy - od znaku posun uložíme 15 znaků
-  // např. na začátku uložíme znaky 0 až 15
-  String vypis;
-  vypis = text.substring(posun, posun+15);
-  // výpis uložené části zprávy na OLED displej
-  mujOled.print(vypis);
+
+    mujOled.firstPage();
+    do
+    {    
+      // nastavení písma, další písma zde:
+      // https://github.com/olikraus/u8glib/wiki/fontsize
+      mujOled.setFont(u8g_font_10x20);
+      // nastavení výpisu od souřadnic x=0, y=25; y záleží na velikosti písma
+      mujOled.setPrintPos(0, 25);
+      // uložení části zprávy - od znaku posun uložíme 15 znaků
+      // např. na začátku uložíme znaky 0 až 15
+      String vypis;
+      vypis = text.substring(posun, posun+15);
+      // výpis uložené části zprávy na OLED displej
+      mujOled.print(vypis);
+   } while( mujOled.nextPage() );
+}
+void(* resetFunc) (void) = 0;
+
+void run_watchdog()
+{
+  if (delka_zalevani > max_delka_zalevani_den )
+  {
+    chyba_cerpadla = 1;
+  }
+  if (millis() > 86400000)
+  {
+    resetFunc();
+  }
 }

@@ -28,13 +28,15 @@ unsigned long cas = 0;
 unsigned long cas_sucha = 0;
 
 //delay before dry detection and pump start (to provide some hystheresis)
-unsigned long zpozdeni = 200; //21 600 000;
+unsigned long zpozdeni = 21600;  //s
 
 //time when pump started
 unsigned long cas_spusteni = 0;
 
 //max time to run pump at once
-unsigned long max_delka_zalevani = 20;
+unsigned long max_delka_zalevani = 30;
+
+int pocetZalevani = 0;
 
 int vlhkost1 = 100;
 int vlhkost2 = 100;
@@ -50,7 +52,7 @@ int chyba_cerpadla = 0;
 int blik = 0;
 
 unsigned long delka_zalevani = 0;
-unsigned long max_delka_zalevani_den = 60000; //maximalni delka zalevani za jeden den je 3min
+unsigned long max_delka_zalevani_den = 120000; //maximalni delka zalevani za jeden den je 2min
 
 
 
@@ -95,7 +97,7 @@ void loop() {
     }
     else 
     {
-        interval_mereni = 10000;
+        interval_mereni = 20000;
     }
   
   if (millis() - cas > interval_mereni) {
@@ -164,8 +166,19 @@ void loop() {
       disp = !disp;
     }
     else
-        vykresliText(0, text);
-
+    {
+      if(disp == 0)
+        {
+          vykresliText(0, text);
+        }
+        else
+        {
+           String pocetZalevani_s = "Pocet Z: " + String(pocetZalevani);
+           vykresliText(0, pocetZalevani_s);
+        }
+        
+    }  
+    disp = !disp;
     // ukončení řádku na sériové lince
     Serial.println();
     // vypnutí napájecího napětí pro modul
@@ -229,6 +242,7 @@ void startCerpadlo()
         digitalWrite(cerpadloPin, LOW);
         //write down time when pump started
         cas_spusteni = millis();
+        pocetZalevani += 1;
     }
 }
 
@@ -283,7 +297,7 @@ void tlacitko_test()
   static unsigned long last_interrupt_time = 0;
   unsigned long interrupt_time = millis();
   // If interrupts come faster than 200ms, assume it's a bounce and ignore
-  if (interrupt_time - last_interrupt_time > 200)
+  if (interrupt_time - last_interrupt_time > 300)
   {
       //start pump immediatelly. If already started, stop it
       if (stav == 2)
